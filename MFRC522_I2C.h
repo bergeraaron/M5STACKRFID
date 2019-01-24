@@ -386,7 +386,7 @@ public:
 	void PICC_DumpToSerial(Uid *uid);
 	void PICC_DumpMifareClassicToSerial(Uid *uid, byte piccType, MIFARE_Key *key);
 	void PICC_DumpMifareClassicSectorToSerial(Uid *uid, MIFARE_Key *key, byte sector);
-  void PICC_DumpMifareClassicSectorToBuffer(Uid *uid, MIFARE_Key *key, byte sector, byte * buffer, int buffer_index);
+	void PICC_DumpMifareClassicSectorToBuffer(Uid *uid, MIFARE_Key *key, byte sector, byte buffer[64][16]);
 	void PICC_DumpMifareUltralightToSerial();
 	void MIFARE_SetAccessBits(byte *accessBitBuffer, byte g0, byte g1, byte g2, byte g3);
 	bool MIFARE_OpenUidBackdoor(bool logErrors);

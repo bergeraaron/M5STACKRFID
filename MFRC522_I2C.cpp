@@ -1468,14 +1468,13 @@ void MFRC522::PICC_DumpMifareClassicSectorToSerial(Uid *uid,			///< Pointer to U
 void MFRC522::PICC_DumpMifareClassicSectorToBuffer(Uid *uid,      ///< Pointer to Uid struct returned from a successful PICC_Select().
                           MIFARE_Key *key,  ///< Key A for the sector.
                           byte sector,     ///< The sector to dump, 0..39.
-                          byte * buffer,
-                          int buffer_index
+                          byte buffer [64][16]
                           ) {
   byte status;
   byte firstBlock;    // Address of lowest address to dump actually last block dumped)
   byte no_of_blocks;    // Number of blocks in sector
-  bool isSectorTrailer; // Set to true while handling the "last" (ie highest address) in the sector.
-
+  bool isSectorTrailer;
+/**/
   // The access bits are stored in a peculiar fashion.
   // There are four groups:
   //    g[3]  Access bits for the sector trailer, block 3 (for sectors 0-31) or block 15 (for sectors 32-39)
@@ -1490,7 +1489,7 @@ void MFRC522::PICC_DumpMifareClassicSectorToBuffer(Uid *uid,      ///< Pointer t
   byte g[4];        // Access bits for each of the four groups.
   byte group;       // 0-3 - active group for access bits
   bool firstInGroup;    // True for the first block dumped in the group
-
+/**/
   // Determine position and size of sector.
   if (sector < 32) { // Sectors 0..31 has 4 blocks each
     no_of_blocks = 4;
@@ -1509,31 +1508,11 @@ void MFRC522::PICC_DumpMifareClassicSectorToBuffer(Uid *uid,      ///< Pointer t
   byte local_buffer[18];
   byte blockAddr;
   isSectorTrailer = true;
+  //Serial.printf("no_of_blocks:%d firstBlock:%d\n",no_of_blocks,firstBlock);
   for (int8_t blockOffset = no_of_blocks - 1; blockOffset >= 0; blockOffset--) {
+  //for (int8_t blockOffset = 0; blockOffset < no_of_blocks; blockOffset--) {
     blockAddr = firstBlock + blockOffset;
-    // Sector number - only on first line
-    if (isSectorTrailer) {
-      if(sector < 10)
-        Serial.print(F("   ")); // Pad with spaces
-      else
-        Serial.print(F("  ")); // Pad with spaces
-      Serial.print(sector);
-      Serial.print(F("   "));
-    }
-    else {
-      Serial.print(F("       "));
-    }
-    // Block number
-    if(blockAddr < 10)
-      Serial.print(F("   ")); // Pad with spaces
-    else {
-      if(blockAddr < 100)
-        Serial.print(F("  ")); // Pad with spaces
-      else
-        Serial.print(F(" ")); // Pad with spaces
-    }
-    Serial.print(blockAddr);
-    Serial.print(F("  "));
+
     // Establish encrypted communications before reading the first block
     if (isSectorTrailer) {
       status = PCD_Authenticate(PICC_CMD_MF_AUTH_KEY_A, firstBlock, key, uid);
@@ -1551,17 +1530,7 @@ void MFRC522::PICC_DumpMifareClassicSectorToBuffer(Uid *uid,      ///< Pointer t
       Serial.println(GetStatusCodeName(status));
       continue;
     }
-    // Dump data
-    for (byte index = 0; index < 16; index++) {
-      if(local_buffer[index] < 0x10)
-        Serial.print(F(" 0"));
-      else
-        Serial.print(F(" "));
-      Serial.print(local_buffer[index], HEX);
-      if ((index % 4) == 3) {
-        Serial.print(F(" "));
-      }
-    }
+
     // Parse sector trailer data
     if (isSectorTrailer) {
       c1  = local_buffer[7] >> 4;
@@ -1577,35 +1546,12 @@ void MFRC522::PICC_DumpMifareClassicSectorToBuffer(Uid *uid,      ///< Pointer t
       g[3] = ((c1 & 8) >> 1) | ((c2 & 8) >> 2) | ((c3 & 8) >> 3);
       isSectorTrailer = false;
     }
-
-    // Which access group is this block in?
-    if (no_of_blocks == 4) {
-      group = blockOffset;
-      firstInGroup = true;
-    }
-    else {
-      group = blockOffset / 5;
-      firstInGroup = (group == 3) || (group != (blockOffset + 1) / 5);
+    //each part of the block
+    for(byte bctr=0;bctr<16;bctr++)
+    {
+      buffer[blockAddr][bctr] = local_buffer[bctr];
     }
 
-    if (firstInGroup) {
-      // Print access bits
-      Serial.print(F(" [ "));
-      Serial.print((g[group] >> 2) & 1, DEC); Serial.print(F(" "));
-      Serial.print((g[group] >> 1) & 1, DEC); Serial.print(F(" "));
-      Serial.print((g[group] >> 0) & 1, DEC);
-      Serial.print(F(" ] "));
-      if (invertedError) {
-        Serial.print(F(" Inverted access bits did not match! "));
-      }
-    }
-
-    if (group != 3 && (g[group] == 1 || g[group] == 6)) { // Not a sector trailer, a value block
-      long value = (long(local_buffer[3])<<24) | (long(local_buffer[2])<<16) | (long(local_buffer[1])<<8) | long(local_buffer[0]);
-      Serial.print(F(" Value=0x")); Serial.print(value, HEX);
-      Serial.print(F(" Adr=0x")); Serial.print(local_buffer[12], HEX);
-    }
-    Serial.println();
   }
 
   return;
