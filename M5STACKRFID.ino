@@ -1,13 +1,10 @@
-#include <sd_defines.h>
-#include <sd_diskio.h>
-#include <SD.h>
-
 //https://github.com/miguelbalboa/rfid/blob/master/examples/MifareClassicValueBlock/MifareClassicValueBlock.ino
 #include <Wire.h>
 #include "MFRC522_I2C.h"
 #include <M5Stack.h>
-
 #include <Adafruit_NeoPixel.h>
+
+bool display_serial = false;
 
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = pin number (most are valid)
@@ -17,7 +14,8 @@
 //   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
 //   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
 #define PIN 15
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(60, PIN, NEO_GRB + NEO_KHZ800);
+#define num_pixels 10
+Adafruit_NeoPixel pixels = Adafruit_NeoPixel(num_pixels, PIN, NEO_GRB + NEO_KHZ800);
 
 // 0x28 is i2c address on SDA. Check your address with i2cscanner if not match.
 MFRC522 mfrc522(0x28);   // Create MFRC522 instance.
@@ -36,23 +34,36 @@ byte sector_blocks[16] = {3,7,11,15,19,23,27,31,35,39,43,47,51,55,59,63};
 //byte full_card[1024];//1k mifare
 byte full_card[64][16];
 //int full_card_ctr = 0;
-
+bool have_sd_card = false;
 int statemachine = 0;
 
-void sd_card_setup()
+void turn_off_leds()
 {
-    Serial.begin(115200);
-    if(!SD.begin()){
-        Serial.println("Card Mount Failed");
-        return;
-    }
-    uint8_t cardType = SD.cardType();
+  for(byte i=0;i<num_pixels;i++)
+  {
+    pixels.setPixelColor(i, pixels.Color(0, 0, 0));
+  }
+  pixels.show();
+}
 
-    if(cardType == CARD_NONE){
-        Serial.println("No SD card attached");
-        return;
-    }
+bool sd_card_setup()
+{
+  if(display_serial)
+  Serial.begin(115200);
+  if(!SD.begin()){
+    if(display_serial)
+    Serial.println("Card Mount Failed");
+    return false;
+  }
+  uint8_t cardType = SD.cardType();
 
+  if(cardType == CARD_NONE){
+    if(display_serial)
+    Serial.println("No SD card attached");
+    return false;
+  }
+  if(display_serial)
+  {
     Serial.print("SD Card Type: ");
     if(cardType == CARD_MMC){
         Serial.println("MMC");
@@ -63,83 +74,109 @@ void sd_card_setup()
     } else {
         Serial.println("UNKNOWN");
     }
-
-    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-    Serial.printf("SD Card Size: %lluMB\n", cardSize);
-/**
-    listDir(SD, "/", 0);
-    createDir(SD, "/mydir");
-    listDir(SD, "/", 0);
-    removeDir(SD, "/mydir");
-    listDir(SD, "/", 2);
-    writeFile(SD, "/hello.txt", "Hello ");
-    appendFile(SD, "/hello.txt", "World!\n");
-    readFile(SD, "/hello.txt");
-    deleteFile(SD, "/foo.txt");
-    renameFile(SD, "/hello.txt", "/foo.txt");
-    readFile(SD, "/foo.txt");
-    testFileIO(SD, "/test.txt");
-/**/
-    Serial.printf("Total space: %lluMB\n", SD.totalBytes() / (1024 * 1024));
-    Serial.printf("Used space: %lluMB\n", SD.usedBytes() / (1024 * 1024));
+  }
+  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+  if(display_serial)
+  Serial.printf("SD Card Size: %lluMB\n", cardSize);
+  return true;
 }
 
-void writeFile(fs::FS &fs, const char * path, const char * message){
-    Serial.printf("Writing file: %s\n", path);
+bool writeFile(fs::FS &fs, const char * path, const unsigned char * message){
+  if(display_serial)
+  Serial.printf("Writing file: %s\n", path);
 
-    File file = fs.open(path, FILE_WRITE);
-    if(!file){
-        Serial.println("Failed to open file for writing");
-        return;
-    }
-    if(file.print(message)){
-        Serial.println("File written");
-    } else {
-        Serial.println("Write failed");
-    }
+  File file = fs.open(path, FILE_WRITE);
+  if(!file){
+    if(display_serial)
+    Serial.println("Failed to open file for writing");
+    return false;
+  }
+  if(file.write(message,1024))
+  {
+    if(display_serial)
+    Serial.println("File written");
     file.close();
+    return true;
+  }
+  else
+  {
+    if(display_serial)
+    Serial.println("Write failed");
+    file.close();
+    return false;
+  }
 }
 
-void save_file(char * buffer,char * uid)
+bool save_file(unsigned char * buffer,char * uid)
 {
   char file_name[64];memset(file_name,0x00,64);
   snprintf(file_name,64,"/%s.mfd",uid);
-  writeFile(SD,file_name,buffer);
+  bool status = writeFile(SD,file_name,buffer);
+  return status;
+}
+
+void screentest()
+{
+	//for(byte i=0;i<300;i++)
+	//{
+    byte i = 400;
+		M5.Lcd.setCursor(0,i);
+		M5.Lcd.printf("i:%d",i);		
+	//}
 }
 
 void setup() {
 
   M5.Lcd.begin();
-  M5.Lcd.fillScreen( BLACK );
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.setTextColor( WHITE );
-  M5.Lcd.setTextSize(1);
-
-  M5.Lcd.fillScreen( BLACK );
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.println("M5StackFire MFRC522");
+  if(display_serial)
   Serial.begin(115200);           // Initialize serial communications with the PC
   Wire.begin();                   // Initialize I2C
   M5.begin();
-  //turn off the neopixels
-  pinMode(15,OUTPUT);
-  digitalWrite(15,1);
-    
+  reset_screen();
+
   mfrc522.PCD_Init();             // Init MFRC522
 
-  strip.begin();
-  strip.show(); // Initialize all pixels to 'off'
+  pixels.begin();
+  turn_off_leds();
+  pixels.show(); // Initialize all pixels to 'off'
 
-  sd_card_setup();
+  have_sd_card = sd_card_setup();
 
   ShowReaderDetails();            // Show details of PCD - MFRC522 Card Reader details
+  if(display_serial)
   Serial.println(F("Scan PICC to see UID, type, and data blocks..."));
-  M5.Lcd.println("Waiting for Card...");
+  if(!have_sd_card)
+    M5.Lcd.println("SD Card Missing!");
+}
+
+void reset_screen()
+{
+    M5.Lcd.fillScreen( BLACK );
+    M5.Lcd.setCursor(0, 0);
+    M5.Lcd.setTextColor( WHITE );
+    M5.Lcd.setTextSize(2);
+
+    M5.Lcd.fillScreen( BLACK );
+    M5.Lcd.setCursor(130, 210);
+    M5.Lcd.print("Reset");
+    M5.Lcd.setCursor(0, 0);
+    M5.Lcd.println("Waiting for Card...");
 }
 
 void loop()
 {
-
+/**
+  screentest();
+  delay(100);
+  return;
+/**/
+  //always check to see if the middle button was pushed, which will reset things
+  if(M5.BtnB.wasPressed())
+  {
+    reset_screen();
+    mfrc522.PCD_Init();
+    statemachine = 0;
+  }
   switch (statemachine)
   {
       case 1://we have a card
@@ -165,7 +202,7 @@ void loop()
           M5.Lcd.println("MIFARE Mini");
         else if(piccType == MFRC522::PICC_TYPE_MIFARE_1K)
           M5.Lcd.println("MIFARE 1K");
-        else if(piccType == MFRC522::PICC_TYPE_MIFARE_4K)
+        else if(piccType == MFRC522::PICC_TYPE_MIFARE_4K)//currently not really supported
           M5.Lcd.println("MIFARE 4K");
           statemachine = 2;
 
@@ -173,14 +210,27 @@ void loop()
       }
       case 2:
       {
-        parse_card();
-        statemachine = 3;
+        if(parse_card())
+          statemachine = 3;
+        else
+        {
+          M5.Lcd.println("Error Reading Card!");
+          delay(1000);
+          statemachine = 5;
+        }
         break;
       }
       case 3:
       {
         //look for user input
-        M5.Lcd.println("Save to Card?");
+        M5.Lcd.println("Save to SD Card?");
+        M5.Lcd.setCursor(50, 210);
+        M5.Lcd.print("Yes");
+        M5.Lcd.setCursor(130, 210);
+        M5.Lcd.print("Reset");
+        M5.Lcd.setCursor(240, 210);
+        M5.Lcd.print("No");
+        //need to draw the yes/no buttons
         statemachine = 4;
         break;
       }
@@ -190,7 +240,7 @@ void loop()
         if(M5.BtnA.wasPressed())
         {
           //yes
-          char tmp_buffer[1024];
+          unsigned char tmp_buffer[1024];
           short tmpctr=0;
           char tmp_uid[32];
           //for (byte i = 0; i < mfrc522.uid.size; i++)//not the safest way to do it...
@@ -204,7 +254,13 @@ void loop()
                 tmpctr++;
               }
           }
-          save_file(tmp_buffer,tmp_uid);
+          //clear the screen
+          reset_screen();
+          if(save_file(tmp_buffer,tmp_uid))
+            M5.Lcd.printf("File saved %s.mfd\n",tmp_uid);
+          else
+            M5.Lcd.println("File not saved");
+          delay(1000);  
           statemachine = 5;
         }
         else if(M5.BtnC.wasPressed())
@@ -216,14 +272,14 @@ void loop()
       case 5:
       {
         //reset
-        M5.Lcd.println("Reset");
+        reset_screen();
         mfrc522.PCD_Init();
         statemachine = 0;
       }
       default:
       {
         // Look for new cards, and select one if present
-        if ( ! mfrc522.PICC_IsNewCardPresent() || ! mfrc522.PICC_ReadCardSerial() )
+        if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial())
         {
           delay(50);
         }
@@ -236,7 +292,7 @@ void loop()
 
 }
 
-void parse_card()
+bool parse_card()
 {
 // In this sample we use the second sector,
     // that is: sector #1, covering block #4 up to and including block #7
@@ -246,6 +302,9 @@ void parse_card()
     byte buffer[18];
     byte size = sizeof(buffer);
     int32_t value;
+
+    byte valid_a_key[6];memset(valid_a_key,0x00,6);
+    byte valid_b_key[6];memset(valid_b_key,0x00,6);
 
     for(byte sector=0;sector < 16;sector++)
     {
@@ -258,29 +317,51 @@ void parse_card()
           }
       
             // Authenticate using key A
-            Serial.printf("sector:%d block:%d Authenticating using key A %d...",sector,sector_blocks[sector],k);
-            Serial.println();
+            if(display_serial)
+            {
+              Serial.printf("sector:%d block:%d Authenticating using key A %d...",sector,sector_blocks[sector],k);
+              Serial.println();
+            }
             status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, sector_blocks[sector], &key, &(mfrc522.uid));
             if (status != MFRC522::STATUS_OK) {
 if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
+  if(display_serial)
   Serial.println(F("No card was previously selected, and none are available. Failed to set UID."));
-  return;
+  return false;
 }
             }
             else
+            {
+              //valid key a
+              for (byte i = 0; i < 6; i++)
+              {
+                valid_a_key[i] = key.keyByte[i];
+              }
               break;
+            }
             // Authenticate using key B
-            Serial.printf("sector:%d block:%d Authenticating using key B %d...",sector,sector_blocks[sector],k);
-            Serial.println();
+            if(display_serial)
+            {
+              Serial.printf("sector:%d block:%d Authenticating using key B %d...",sector,sector_blocks[sector],k);
+              Serial.println();
+            }
             status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_B, sector_blocks[sector], &key, &(mfrc522.uid));
             if (status != MFRC522::STATUS_OK) {
 if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
+  if(display_serial)
   Serial.println(F("No card was previously selected, and none are available. Failed to set UID."));
-  return;
+  return false;
 }
             }
             else
+            {
+              //valid key b
+              for (byte i = 0; i < 6; i++)
+              {
+                valid_b_key[i] = key.keyByte[i];
+              }
               break;
+            }
         }
 /**
         //acturally read it out
@@ -290,59 +371,71 @@ if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
         Serial.println();      
 /**/
         //sector complete
-        M5.Lcd.printf("%d ",sector);
+        //M5.Lcd.printf("%d ",sector);
+        M5.Lcd.printf(".");
         
 	      //dump to buffer
 	      mfrc522.PICC_DumpMifareClassicSectorToBuffer(&(mfrc522.uid), &key, sector, full_card);
 
+        //need to copy the keys to the right spot since the dump only uses one of them.
+        //a 0-5
+        //b 10-15
+        //valid key a
+        for (byte i = 0; i < 6; i++)
+        {
+          full_card[sector_blocks[sector]][i] = valid_a_key[i];
+        }
+        /**
+        //valid key b
+        for (byte i = 0; i < 6; i++)
+        {
+          full_card[sector_blocks[sector]][10+i] = valid_b_key[i];
+        }
+        /**/
     }
 
-/**/
-        int bctr=0;
-        for(int s=0;s<16;s++)//16
+    if(display_serial)
+    {
+      int bctr=0;
+      for(int s=0;s<16;s++)//16
+      {
+        for(int b=0;b<4;b++)
         {
-          for(int b=0;b<4;b++)
-          {
-              Serial.printf("Sector:%d Block:%d ",s,b);
-              for(int d=0;d<16;d++)
-              {
-                Serial.printf("%02X ",full_card[bctr][d]);
-              }
-              Serial.printf("\n");
-              bctr++;
-          }
-          Serial.printf("\n");
+            Serial.printf("Sector:%d Block:%d ",s,b);
+            for(int d=0;d<16;d++)
+            {
+              Serial.printf("%02X ",full_card[bctr][d]);
+            }
+            Serial.printf("\n");
+            bctr++;
         }
+        Serial.printf("\n");
+      }
+      Serial.println("Done Reading");
+    }
 
-/**/
-    Serial.println("Done Reading");
-    M5.Lcd.println("Done Reading");
+    M5.Lcd.println("\nDone Reading");
 
+    return true;
 }
 
 void ShowReaderDetails() {
   // Get the MFRC522 software version
   byte v = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
-  Serial.print(F("MFRC522 Software Version: 0x"));
-  Serial.print(v, HEX);
-  if (v == 0x91)
-    Serial.print(F(" = v1.0"));
-  else if (v == 0x92)
-    Serial.print(F(" = v2.0"));
-  else
-    Serial.print(F(" (unknown)"));
-  Serial.println("");
-  // When 0x00 or 0xFF is returned, communication probably failed
-  if ((v == 0x00) || (v == 0xFF)) {
-    Serial.println(F("WARNING: Communication failure, is the MFRC522 properly connected?"));
-  }
-}
-/**
- * Helper routine to dump a byte array as hex values to Serial.
- */
-void dump_byte_array(byte *buffer, byte bufferSize) {
-    for (byte i = 0; i < bufferSize; i++) {
-        Serial.print(buffer[i] < 0x10 ? " 0" : " ");
-        Serial.print(buffer[i], HEX);
+  if(display_serial)
+  {
+    Serial.print(F("MFRC522 Software Version: 0x"));
+    Serial.print(v, HEX);
+    if (v == 0x91)
+      Serial.print(F(" = v1.0"));
+    else if (v == 0x92)
+      Serial.print(F(" = v2.0"));
+    else
+      Serial.print(F(" (unknown)"));
+    Serial.println("");
+    // When 0x00 or 0xFF is returned, communication probably failed
+    if ((v == 0x00) || (v == 0xFF)) {
+      Serial.println(F("WARNING: Communication failure, is the MFRC522 properly connected?"));
     }
+  }
 }
