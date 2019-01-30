@@ -1,10 +1,13 @@
 //https://github.com/miguelbalboa/rfid/blob/master/examples/MifareClassicValueBlock/MifareClassicValueBlock.ino
 #include <Wire.h>
 #include "MFRC522_I2C.h"
+#include "states.h"
 #include <M5Stack.h>
 #include <Adafruit_NeoPixel.h>
 
 bool display_serial = false;
+bool audio_feedback = false;//use audio to let us know if a card backuped
+bool neopixel_feedback = false;//use neopixels to let us know if a card backuped
 
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = pin number (most are valid)
@@ -20,7 +23,7 @@ Adafruit_NeoPixel pixels = Adafruit_NeoPixel(num_pixels, PIN, NEO_GRB + NEO_KHZ8
 // 0x28 is i2c address on SDA. Check your address with i2cscanner if not match.
 MFRC522 mfrc522(0x28);   // Create MFRC522 instance.
 
-MFRC522::MIFARE_Key key;
+MFRC522::MIFARE_Key key;//we copy the keys from below into this one when we actually try to authenticate
 
 int num_keys = 2;
 //default keys
@@ -35,7 +38,7 @@ byte sector_blocks[16] = {3,7,11,15,19,23,27,31,35,39,43,47,51,55,59,63};
 byte full_card[64][16];
 //int full_card_ctr = 0;
 bool have_sd_card = false;
-int statemachine = 0;
+int statemachine = DEFAULTLOOP;
 
 void turn_off_leds()
 {
@@ -43,6 +46,14 @@ void turn_off_leds()
   {
     pixels.setPixelColor(i, pixels.Color(0, 0, 0));
   }
+  pixels.show();
+}
+
+void turn_on_led(int num, int r, int g, int b)
+{
+  if(num > num_pixels)
+    num = num_pixels;
+  pixels.setPixelColor(num, pixels.Color(r, g, b));
   pixels.show();
 }
 
@@ -115,16 +126,6 @@ bool save_file(unsigned char * buffer,char * uid)
   return status;
 }
 
-void screentest()
-{
-	//for(byte i=0;i<300;i++)
-	//{
-    byte i = 400;
-		M5.Lcd.setCursor(0,i);
-		M5.Lcd.printf("i:%d",i);		
-	//}
-}
-
 void setup() {
 
   M5.Lcd.begin();
@@ -136,9 +137,12 @@ void setup() {
 
   mfrc522.PCD_Init();             // Init MFRC522
 
-  pixels.begin();
-  turn_off_leds();
-  pixels.show(); // Initialize all pixels to 'off'
+  if(neopixel_feedback)
+  {
+    pixels.begin();
+    turn_off_leds();
+    pixels.show(); // Initialize all pixels to 'off'
+  }
 
   have_sd_card = sd_card_setup();
 
@@ -163,23 +167,33 @@ void reset_screen()
     M5.Lcd.println("Waiting for Card...");
 }
 
+void happy_sound()
+{
+  //freq,time(ms)
+  M5.Speaker.tone(200, 200);
+  M5.Speaker.tone(300, 200);
+}
+
+void sad_sound()
+{
+  //freq,time(ms)
+  M5.Speaker.tone(200, 200);
+  M5.Speaker.tone(100, 200);
+}
+
 void loop()
 {
-/**
-  screentest();
-  delay(100);
-  return;
-/**/
+
   //always check to see if the middle button was pushed, which will reset things
   if(M5.BtnB.wasPressed())
   {
     reset_screen();
     mfrc522.PCD_Init();
-    statemachine = 0;
+    statemachine = DEFAULTLOOP;
   }
   switch (statemachine)
   {
-      case 1://we have a card
+      case CARDFOUND://we have a card
       {
         //print the UID
         for (byte i = 0; i < mfrc522.uid.size; i++)
@@ -194,7 +208,7 @@ void loop()
             &&  piccType != MFRC522::PICC_TYPE_MIFARE_1K
             &&  piccType != MFRC522::PICC_TYPE_MIFARE_4K) {
             M5.Lcd.println(F("This sample only works with MIFARE Classic cards."));
-            statemachine = 0;
+            statemachine = DEFAULTLOOP;
             break;
         }
 
@@ -204,23 +218,37 @@ void loop()
           M5.Lcd.println("MIFARE 1K");
         else if(piccType == MFRC522::PICC_TYPE_MIFARE_4K)//currently not really supported
           M5.Lcd.println("MIFARE 4K");
-          statemachine = 2;
+          statemachine = PARSECARD;
 
         break;
       }
-      case 2:
+      case PARSECARD:
       {
         if(parse_card())
-          statemachine = 3;
+        {
+          statemachine = SAVECARDDRAW;
+          if(audio_feedback)
+            happy_sound();
+        }
         else
         {
+          if(audio_feedback)
+            sad_sound();
+          if(neopixel_feedback)
+          {
+            for(int i=0;i<num_pixels;i++)
+              turn_on_led(i, 255, 0, 0);//num,r,g,b
+          }
           M5.Lcd.println("Error Reading Card!");
           delay(1000);
-          statemachine = 5;
+          statemachine = RESET;
         }
+        if(neopixel_feedback)
+          turn_off_leds();
+
         break;
       }
-      case 3:
+      case SAVECARDDRAW:
       {
         //look for user input
         M5.Lcd.println("Save to SD Card?");
@@ -231,10 +259,10 @@ void loop()
         M5.Lcd.setCursor(240, 210);
         M5.Lcd.print("No");
         //need to draw the yes/no buttons
-        statemachine = 4;
+        statemachine = SAVECARD;
         break;
       }
-      case 4:
+      case SAVECARD:
       {
         //look for user input
         if(M5.BtnA.wasPressed())
@@ -257,24 +285,44 @@ void loop()
           //clear the screen
           reset_screen();
           if(save_file(tmp_buffer,tmp_uid))
+          {
             M5.Lcd.printf("File saved %s.mfd\n",tmp_uid);
+            if(audio_feedback)
+              happy_sound();
+            if(neopixel_feedback)
+            {
+              for(int i=0;i<num_pixels;i++)
+                turn_on_led(i, 0, 255, 0);//num,r,g,b
+            }
+          }
           else
+          {
             M5.Lcd.println("File not saved");
+            if(audio_feedback)
+              sad_sound();
+            if(neopixel_feedback)
+            {
+              for(int i=0;i<num_pixels;i++)
+                turn_on_led(i, 255, 0, 0);//num,r,g,b
+            }
+          }
           delay(1000);  
-          statemachine = 5;
+          statemachine = RESET;
+          if(neopixel_feedback)
+            turn_off_leds();
         }
         else if(M5.BtnC.wasPressed())
         {
-          statemachine = 5;
+          statemachine = RESET;
         }
         break;
       }
-      case 5:
+      case RESET:
       {
         //reset
         reset_screen();
         mfrc522.PCD_Init();
-        statemachine = 0;
+        statemachine = DEFAULTLOOP;
       }
       default:
       {
@@ -284,7 +332,7 @@ void loop()
           delay(50);
         }
         else
-          statemachine = 1;
+          statemachine = CARDFOUND;
         break;
       }
   }
@@ -296,12 +344,12 @@ bool parse_card()
 {
 // In this sample we use the second sector,
     // that is: sector #1, covering block #4 up to and including block #7
-    byte trailerBlock = 0;
+//    byte trailerBlock = 0;
     //MFRC522::StatusCode 
     byte status;
-    byte buffer[18];
-    byte size = sizeof(buffer);
-    int32_t value;
+    //byte buffer[18];
+    //byte size = sizeof(buffer);
+    //int32_t value;
 
     byte valid_a_key[6];memset(valid_a_key,0x00,6);
     byte valid_b_key[6];memset(valid_b_key,0x00,6);
@@ -369,11 +417,13 @@ if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
         Serial.println(F("Current data in sector:"));
         mfrc522.PICC_DumpMifareClassicSectorToSerial(&(mfrc522.uid), &key, sector);
         Serial.println();      
-/**/
+**/
         //sector complete
         //M5.Lcd.printf("%d ",sector);
         M5.Lcd.printf(".");
-        
+        if(neopixel_feedback)
+          turn_on_led(sector, 0, 255, 0);//num,r,g,b
+
 	      //dump to buffer
 	      mfrc522.PICC_DumpMifareClassicSectorToBuffer(&(mfrc522.uid), &key, sector, full_card);
 
@@ -391,7 +441,7 @@ if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
         {
           full_card[sector_blocks[sector]][10+i] = valid_b_key[i];
         }
-        /**/
+        **/
     }
 
     if(display_serial)
