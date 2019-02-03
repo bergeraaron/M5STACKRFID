@@ -389,6 +389,7 @@ public:
 	void PICC_DumpMifareClassicSectorToBuffer(Uid *uid, MIFARE_Key *key, byte sector, byte buffer[64][16]);
 	void PICC_DumpMifareUltralightToSerial();
 	void MIFARE_SetAccessBits(byte *accessBitBuffer, byte g0, byte g1, byte g2, byte g3);
+        bool MIFARE_CheckBackdoor();
 	bool MIFARE_OpenUidBackdoor(bool logErrors);
 	bool MIFARE_SetUid(byte *newUid, byte uidSize, bool logErrors);
 	bool MIFARE_UnbrickUidSector(bool logErrors);

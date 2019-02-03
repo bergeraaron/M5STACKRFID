@@ -1618,6 +1618,46 @@ void MFRC522::MIFARE_SetAccessBits(	byte *accessBitBuffer,	///< Pointer to byte 
 } // End MIFARE_SetAccessBits()
 
 
+bool MFRC522::MIFARE_CheckBackdoor()
+{
+        bool logErrors = true;
+        // Magic sequence:
+        // > 50 00 57 CD (HALT + CRC)
+        // > 40 (7 bits only)
+        // < A (4 bits only)
+        // > 43
+        // < A (4 bits only)
+        // Then you can write to sector 0 without authenticating
+
+        PICC_HaltA(); // 50 00 57 CD
+
+        byte cmd = 0x40;
+        byte validBits = 7; /* Our command is only 7 bits. After receiving card response,
+                                                  this will contain amount of valid response bits. */
+        byte response[32]; // Card's response is written here
+        byte received;
+        byte status = PCD_TransceiveData(&cmd, (byte)1, response, &received, &validBits, (byte)0, false); // 40
+        if(status != STATUS_OK) {
+                if(logErrors) {
+                        Serial.println(F("Card did not respond to 0x40 after HALT command. Are you sure it is a UID changeable one?"));
+                        Serial.print(F("Error name: "));
+                        Serial.println(GetStatusCodeName(status));
+                }
+                return false;
+        }
+        if (received != 1 || response[0] != 0x0A) {
+                if (logErrors) {
+                        Serial.print(F("Got bad response on backdoor 0x40 command: "));
+                        Serial.print(response[0], HEX);
+                        Serial.print(F(" ("));
+                        Serial.print(validBits);
+                        Serial.print(F(" valid bits)\r\n"));
+                }
+                return false;
+        }
+
+	return true;
+}
 /**
  * Performs the "magic sequence" needed to get Chinese UID changeable
  * Mifare cards to allow writing to sector 0, where the card UID is stored.
