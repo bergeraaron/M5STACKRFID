@@ -1,6 +1,10 @@
 # M5STACKRFID
 M5 Stack Rfid reader
 
+Hardware:
+M5Stack ESP32 Basic Core Development Kit
+M5GO RFID base
+
 Expanded version of the M5Stack RFID example to be able to dump a Mifare Classic 1k card to the SD card.
 
 Normally the neopixels are off by default, but mine required me to turn them off. So the Adafruit Neopixel library is used in the project. If your stay off on their own then you can comment that out.
